@@ -56,10 +56,10 @@ func (sm *fsm) propose(seq int, data []byte) {
 }
 
 func (sm *fsm) chosenValue() ([]byte, bool) {
-	if sm.accepted.isEmpty() {
+	if sm.chosen.isEmpty() {
 		return nil, false
 	} else {
-		return sm.accepted.data, true
+		return sm.chosen.data, true
 	}
 }
 
