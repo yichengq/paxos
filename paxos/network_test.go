@@ -55,8 +55,8 @@ func (ec *eventCalendar) next() float64 {
 
 func (ec *eventCalendar) advance() message {
 	ev := heap.Pop(ec.heap).(event)
-	log.Printf("advance to %+v at %v", ev.msg, ev.happen)
 	ec.now = ev.happen
+	// log.Printf("%+v arrives target at %v", ev.msg, ec.now)
 	return ev.msg
 }
 
@@ -103,6 +103,11 @@ func newCluster(n int) *cluster {
 
 func (c *cluster) down(id int) { c.halts[id] = true }
 
+func (c *cluster) up(id int) {
+	c.halts[id] = false
+	c.nodes[id] = c.nodes[id].reboot()
+}
+
 func (c *cluster) cont() {
 	for c.calendar.len() > 0 {
 		msg := c.calendar.advance()
@@ -125,6 +130,9 @@ func (c *cluster) contUntil(t float64) {
 }
 
 func (c *cluster) send(msg message) {
+	if c.halts[msg.from] {
+		return
+	}
 	if delay, ok := c.links[pair{msg.from, msg.to}].transfer(); ok {
 		c.calendar.add(msg, delay)
 	}
