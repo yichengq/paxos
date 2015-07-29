@@ -1,5 +1,10 @@
 package paxos
 
+import (
+	"log"
+	"reflect"
+)
+
 type network interface {
 	send(msg message)
 }
@@ -18,12 +23,18 @@ type fsm struct {
 	peers []int
 	nt    network
 
+	// proposer
 	propSeq  int
 	promises int
 	reported proposal
-	accepts  int
-	chosen   proposal
 
+	// learner
+	acceptSeq int
+	accepts   int
+	learning  proposal
+	chosen    proposal
+
+	// acceptor
 	// these two fields need to be persisted to stable storage
 	promiseSeq int
 	accepted   proposal
@@ -60,6 +71,16 @@ func (sm *fsm) chosenValue() ([]byte, bool) {
 		return nil, false
 	} else {
 		return sm.chosen.data, true
+	}
+}
+
+func (sm *fsm) reboot() *fsm {
+	return &fsm{
+		id:         sm.id,
+		peers:      sm.peers,
+		nt:         sm.nt,
+		promiseSeq: sm.promiseSeq,
+		accepted:   sm.accepted,
 	}
 }
 
@@ -109,9 +130,11 @@ func (sm *fsm) handleAcceptRequest(msg message) {
 		return
 	}
 	sm.accepted = msg.prop
-	sm.send(msg.from, message{
-		typ: msgAccepted,
-		seq: msg.seq,
+	// TODO: distinguished learner
+	sm.bcast(message{
+		typ:  msgAccepted,
+		seq:  msg.seq,
+		prop: sm.accepted,
 	})
 }
 
@@ -119,14 +142,25 @@ func (sm *fsm) handleAccepted(msg message) {
 	if msg.typ != msgAccepted {
 		panic("invalid message type")
 	}
-	if sm.propSeq != msg.seq {
+	if sm.acceptSeq > msg.seq {
 		return
+	} else if sm.acceptSeq < msg.seq {
+		sm.acceptSeq = msg.seq
+		sm.accepts = 1
+		sm.learning = msg.prop
+	} else {
+		sm.accepts++
+		if !reflect.DeepEqual(sm.learning.data, msg.prop.data) {
+			log.Panicf("different acceptor accepts different value (%q, %q) at seq %d", sm.learning.data, msg.prop.data, sm.acceptSeq)
+		}
 	}
-	sm.accepts++
 	if sm.accepts != sm.quorum() {
 		return
 	}
-	sm.chosen = sm.reported
+	if !sm.chosen.isEmpty() && !reflect.DeepEqual(sm.chosen.data, sm.learning.data) {
+		log.Panicf("have chosen value %q while new value %q is accepted", sm.chosen.data, sm.learning.data)
+	}
+	sm.chosen = sm.learning
 }
 
 func (sm *fsm) bcast(msg message) {
